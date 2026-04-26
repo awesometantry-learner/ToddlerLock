@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+<title>Phone Lock</title>
+<!-- PWA: launches fullscreen with NO browser UI (no address bar, no tabs) -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Phone Lock">
+<meta name="theme-color" content="#0a0a12">
+<script>
+  // Inject PWA manifest inline so "Add to Home Screen" launches fullscreen
+  const manifest = {
+    name: "Phone Lock",
+    short_name: "Lock",
+    display: "fullscreen",
+    start_url: ".",
+    background_color: "#0a0a12",
+    theme_color: "#0a0a12",
+    orientation: "portrait"
+  };
+  const blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = url;
+  document.head.appendChild(link);
+</script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0a0a12;
+    --surface: rgba(255,255,255,0.07);
+    --border: rgba(255,255,255,0.12);
+    --text: #ffffff;
+    --sub: rgba(255,255,255,0.55);
+    --accent: #4fc3f7;
+    --emergency: #ff453a;
+    --key-bg: rgba(255,255,255,0.13);
+    --key-active: rgba(255,255,255,0.28);
+  }
+
+  html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    color: var(--text);
+    touch-action: manipulation;
+    user-select: none;
+  }
+
+  /* Background blur blobs */
+  .bg-blob {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.18;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .blob1 { width: 300px; height: 300px; background: #3a6de8; top: -80px; left: -60px; }
+  .blob2 { width: 250px; height: 250px; background: #7b2fe0; bottom: 100px; right: -50px; }
+  .blob3 { width: 200px; height: 200px; background: #0ea5e9; bottom: 250px; left: 30px; }
+
+  .screen {
+    position: relative;
+    z-index: 1;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+             env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+
+  /* ── Top: time & date ── */
+  .top {
+    flex: 0 0 auto;
+    text-align: center;
+    padding-top: max(40px, 8vh);
+    padding-bottom: 10px;
+  }
+  .time {
+    font-size: clamp(64px, 18vw, 88px);
+    font-weight: 200;
+    letter-spacing: -3px;
+    line-height: 1;
+    color: #fff;
+  }
+  .date {
+    font-size: clamp(14px, 4vw, 17px);
+    color: var(--sub);
+    margin-top: 6px;
+    font-weight: 400;
+    letter-spacing: 0.3px;
+  }
+
+  /* ── Input display ── */
+  .input-area {
+    flex: 0 0 auto;
+    margin-top: max(20px, 4vh);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    height: 24px;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(255,255,255,0.6);
+    background: transparent;
+    transition: background 0.15s, transform 0.12s;
+  }
+  .dot.filled {
+    background: #fff;
+    transform: scale(1.1);
+  }
+
+  /* ── Shake animation for wrong passcode ── */
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20% { transform: translateX(-10px); }
+    40% { transform: translateX(10px); }
+    60% { transform: translateX(-8px); }
+    80% { transform: translateX(8px); }
+  }
+  .input-area.shake { animation: shake 0.4s ease; }
+
+  /* ── Keypad ── */
+  .keypad-wrap {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    padding: 0 20px;
+    max-width: 360px;
+    gap: 0;
+  }
+
+  .keypad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: clamp(10px, 3vw, 16px);
+    width: 100%;
+    max-width: 320px;
+  }
+
+  .key {
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: var(--key-bg);
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s, transform 0.1s;
+    position: relative;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    max-width: 88px;
+    max-height: 88px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  .key:active, .key.pressed {
+    background: var(--key-active);
+    transform: scale(0.93);
+  }
+  .key .num {
+    font-size: clamp(22px, 7vw, 30px);
+    font-weight: 300;
+    line-height: 1;
+  }
+  .key .letters {
+    font-size: clamp(8px, 2.5vw, 10px);
+    letter-spacing: 1.5px;
+    color: var(--sub);
+    margin-top: 2px;
+    font-weight: 500;
+  }
+  .key.empty {
+    background: transparent;
+    pointer-events: none;
+  }
+  .key.del { background: transparent; }
+  .key.del .del-icon {
+    font-size: clamp(20px, 6vw, 26px);
+    color: rgba(255,255,255,0.75);
+  }
+
+  /* ── Bottom row: Emergency + Cancel ── */
+  .bottom-row {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: 360px;
+    padding: 0 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: max(30px, 5vh);
+    margin-top: max(14px, 2vh);
+  }
+
+  .btn-emergency {
+    background: transparent;
+    border: none;
+    color: var(--emergency);
+    font-size: clamp(13px, 3.5vw, 15px);
+    font-weight: 500;
+    cursor: pointer;
+    padding: 8px 4px;
+    letter-spacing: 0.1px;
+  }
+  .btn-emergency:active { opacity: 0.6; }
+
+  .btn-cancel {
+    background: transparent;
+    border: none;
+    color: rgba(255,255,255,0.7);
+    font-size: clamp(13px, 3.5vw, 15px);
+    font-weight: 400;
+    cursor: pointer;
+    padding: 8px 4px;
+  }
+  .btn-cancel:active { opacity: 0.6; }
+
+  /* ── Fake emergency overlay ── */
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(0,0,0,0.85);
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    backdrop-filter: blur(10px);
+  }
+  .overlay.show { display: flex; }
+  .overlay-icon { font-size: 56px; }
+  .overlay-title { font-size: 22px; font-weight: 600; color: #fff; }
+  .overlay-sub { font-size: 15px; color: var(--sub); text-align: center; max-width: 260px; line-height: 1.5; }
+  .overlay-cancel {
+    margin-top: 20px;
+    background: rgba(255,255,255,0.12);
+    border: none;
+    border-radius: 14px;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 500;
+    padding: 14px 48px;
+    cursor: pointer;
+  }
+  .overlay-cancel:active { background: rgba(255,255,255,0.2); }
+
+  /* ── Success (unlock) flash ── */
+  @keyframes flashGreen {
+    0% { opacity: 0; }
+    30% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .flash {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(52, 199, 89, 0.18);
+    pointer-events: none;
+  }
+  .flash.go { display: block; animation: flashGreen 0.6s ease forwards; }
+
+  /* ── Ripple on key press ── */
+  @keyframes ripple {
+    from { transform: translate(-50%,-50%) scale(0); opacity: 0.4; }
+    to   { transform: translate(-50%,-50%) scale(2.5); opacity: 0; }
+  }
+  .ripple-el {
+    position: absolute;
+    width: 60px; height: 60px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.3);
+    animation: ripple 0.5s ease-out forwards;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-blob blob1"></div>
+<div class="bg-blob blob2"></div>
+<div class="bg-blob blob3"></div>
+
+<div class="screen">
+
+  <!-- Time & Date -->
+  <div class="top">
+    <div class="time" id="clock">--:--</div>
+    <div class="date" id="dateStr">Loading...</div>
+  </div>
+
+  <!-- PIN dots -->
+  <div class="input-area" id="inputArea">
+    <div class="dot" id="d0"></div>
+    <div class="dot" id="d1"></div>
+    <div class="dot" id="d2"></div>
+    <div class="dot" id="d3"></div>
+  </div>
+
+  <!-- Keypad -->
+  <div class="keypad-wrap">
+    <div class="keypad" id="keypad">
+      <button class="key" data-val="1"><span class="num">1</span><span class="letters"> </span></button>
+      <button class="key" data-val="2"><span class="num">2</span><span class="letters">ABC</span></button>
+      <button class="key" data-val="3"><span class="num">3</span><span class="letters">DEF</span></button>
+      <button class="key" data-val="4"><span class="num">4</span><span class="letters">GHI</span></button>
+      <button class="key" data-val="5"><span class="num">5</span><span class="letters">JKL</span></button>
+      <button class="key" data-val="6"><span class="num">6</span><span class="letters">MNO</span></button>
+      <button class="key" data-val="7"><span class="num">7</span><span class="letters">PQRS</span></button>
+      <button class="key" data-val="8"><span class="num">8</span><span class="letters">TUV</span></button>
+      <button class="key" data-val="9"><span class="num">9</span><span class="letters">WXYZ</span></button>
+      <button class="key empty"></button>
+      <button class="key" data-val="0"><span class="num">0</span><span class="letters"> </span></button>
+      <button class="key del" id="delBtn"><span class="del-icon">⌫</span></button>
+    </div>
+  </div>
+
+  <!-- Bottom: Emergency + Cancel -->
+  <div class="bottom-row">
+    <button class="btn-emergency" id="emergencyBtn">Emergency</button>
+    <button class="btn-cancel" id="cancelBtn">Cancel</button>
+  </div>
+
+</div>
+
+<!-- Fake emergency overlay (safe — does nothing) -->
+<div class="overlay" id="overlay">
+  <div class="overlay-icon">🚨</div>
+  <div class="overlay-title">Emergency Call</div>
+  <div class="overlay-sub">This is a safe screen — no real call is being made.</div>
+  <button class="overlay-cancel" id="overlayCancel">Go Back</button>
+</div>
+
+<!-- Green flash on correct PIN -->
+<div class="flash" id="flash"></div>
+
+<script>
+  // ── Clock ──
+  function updateClock() {
+    const now = new Date();
+    const h = now.getHours().toString().padStart(2,'0');
+    const m = now.getMinutes().toString().padStart(2,'0');
+    document.getElementById('clock').textContent = h + ':' + m;
+    const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const months = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+    document.getElementById('dateStr').textContent =
+      days[now.getDay()] + ', ' + months[now.getMonth()] + ' ' + now.getDate();
+  }
+  updateClock();
+  setInterval(updateClock, 10000);
+
+  // ── Vibration ──
+  function vibrate(pattern) {
+    if (navigator.vibrate) navigator.vibrate(pattern);
+  }
+
+  // ── PIN logic ──
+  // Change this 4-digit PIN to whatever you want for the "parent unlock"
+  const PARENT_PIN = '1234';
+  let entered = '';
+
+  function updateDots() {
+    for (let i = 0; i < 4; i++) {
+      document.getElementById('d' + i).classList.toggle('filled', i < entered.length);
+    }
+  }
+
+  function shakeInput() {
+    const el = document.getElementById('inputArea');
+    el.classList.remove('shake');
+    void el.offsetWidth; // reflow
+    el.classList.add('shake');
+    setTimeout(() => el.classList.remove('shake'), 500);
+  }
+
+  function pressKey(val) {
+    if (entered.length >= 4) return;
+    vibrate(30); // short tap
+    entered += val;
+    updateDots();
+    if (entered.length === 4) {
+      setTimeout(() => checkPin(), 120);
+    }
+  }
+
+  function deleteLast() {
+    if (entered.length > 0) {
+      vibrate(20);
+      entered = entered.slice(0, -1);
+      updateDots();
+    }
+  }
+
+  function checkPin() {
+    if (entered === PARENT_PIN) {
+      vibrate([40, 60, 40]); // double pulse = success
+      const flash = document.getElementById('flash');
+      flash.classList.remove('go');
+      void flash.offsetWidth;
+      flash.classList.add('go');
+      entered = '';
+      updateDots();
+    } else {
+      vibrate([60, 50, 60, 50, 60]); // triple buzz = wrong
+      shakeInput();
+      setTimeout(() => { entered = ''; updateDots(); }, 600);
+    }
+  }
+
+  // ── Ripple effect ──
+  function addRipple(btn, e) {
+    const r = document.createElement('div');
+    r.className = 'ripple-el';
+    const rect = btn.getBoundingClientRect();
+    const cx = (e.clientX || e.touches?.[0]?.clientX || rect.left + rect.width/2) - rect.left;
+    const cy = (e.clientY || e.touches?.[0]?.clientY || rect.top + rect.height/2) - rect.top;
+    r.style.left = cx + 'px';
+    r.style.top  = cy + 'px';
+    btn.appendChild(r);
+    setTimeout(() => r.remove(), 500);
+  }
+
+  // ── Keypad events ──
+  document.getElementById('keypad').addEventListener('click', e => {
+    const key = e.target.closest('.key');
+    if (!key) return;
+    const val = key.dataset.val;
+    if (val !== undefined) {
+      addRipple(key, e);
+      pressKey(val);
+    }
+  });
+
+  document.getElementById('delBtn').addEventListener('click', e => {
+    addRipple(document.getElementById('delBtn'), e);
+    deleteLast();
+  });
+
+  // ── Cancel — just clears input ──
+  document.getElementById('cancelBtn').addEventListener('click', () => {
+    entered = '';
+    updateDots();
+  });
+
+  // ── Emergency — shows safe overlay, does NOT call anything ──
+  document.getElementById('emergencyBtn').addEventListener('click', () => {
+    vibrate(50);
+    document.getElementById('overlay').classList.add('show');
+  });
+  document.getElementById('overlayCancel').addEventListener('click', () => {
+    document.getElementById('overlay').classList.remove('show');
+  });
+
+  // ── Prevent context menu & text selection (toddler safety) ──
+  document.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('selectstart', e => e.preventDefault());
+
+  // ── Auto fullscreen on first tap ──
+  function goFullscreen() {
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+    if (req) req.call(el).catch(() => {});
+  }
+  // Try immediately, and also on first user touch (browsers require a gesture)
+  document.addEventListener('touchstart', goFullscreen, { once: true });
+  document.addEventListener('click', goFullscreen, { once: true });
+
+  // ── Block ALL navigation attempts ──
+  // Block back button / back gesture
+  history.pushState(null, '', location.href);
+  window.addEventListener('popstate', () => {
+    history.pushState(null, '', location.href);
+  });
+
+  // Block pull-to-refresh and overscroll
+  document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+  // Block keyboard shortcuts (Alt+Tab, F5, etc on desktop)
+  document.addEventListener('keydown', e => {
+    if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'w' || e.key === 't' || e.key === 'l'))) {
+      e.preventDefault();
+    }
+  });
+
+  // Block drag (prevents accidental navigation swipes on some browsers)
+  document.addEventListener('dragstart', e => e.preventDefault());
+</script>
+</body>
+</html>
