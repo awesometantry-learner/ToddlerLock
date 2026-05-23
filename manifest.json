@@ -1,0 +1,9 @@
+{
+  "name": "Phone Lock",
+  "short_name": "Lock",
+  "display": "fullscreen",
+  "start_url": "./index.html",
+  "background_color": "#0a0a12",
+  "theme_color": "#0a0a12",
+  "orientation": "portrait"
+}
