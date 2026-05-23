@@ -186,7 +186,17 @@
   }
   floodHistory();
   window.addEventListener('popstate', () => { history.pushState(null,'',location.href); floodHistory(); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState==='visible') { floodHistory(); goFullscreen(); } });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      floodHistory();
+      // Try fullscreen immediately, then retry several times to beat the address bar
+      goFullscreen();
+      setTimeout(goFullscreen, 100);
+      setTimeout(goFullscreen, 300);
+      setTimeout(goFullscreen, 600);
+      setTimeout(goFullscreen, 1000);
+    }
+  });
   window.addEventListener('pageshow', e => { if (e.persisted) floodHistory(); floodHistory(); });
   window.addEventListener('focus', floodHistory);
   document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
